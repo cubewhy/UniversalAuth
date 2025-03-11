@@ -4,6 +4,7 @@ plugins {
 }
 
 android {
+    namespace "ax.nd.faceunlock.framework_stub"
     compileSdk 32
 
     defaultConfig {

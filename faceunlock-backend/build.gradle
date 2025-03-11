@@ -4,6 +4,7 @@ plugins {
 }
 
 android {
+    namespace "ax.nd.faceunlock.backend"
     compileSdk 32
 
     defaultConfig {

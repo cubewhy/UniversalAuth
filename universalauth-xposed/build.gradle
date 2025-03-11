@@ -4,6 +4,7 @@ plugins {
 }
 
 android {
+    namespace "ax.nd.universalauth.xposed"
     compileSdk 34
 
     defaultConfig {
