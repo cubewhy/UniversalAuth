@@ -4,6 +4,7 @@ import static ax.nd.universalauth.xposed.common.XposedConstants.EXTRA_BYPASS_KEY
 import static ax.nd.universalauth.xposed.common.XposedConstants.EXTRA_UNLOCK_MODE;
 import static ax.nd.universalauth.xposed.common.XposedConstants.MODE_UNLOCK_FADING;
 
+import android.annotation.SuppressLint;
 import android.app.Application;
 import android.content.Context;
 import android.content.Intent;
@@ -26,16 +27,19 @@ import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.callbacks.XC_LoadPackage;
 import kotlin.Unit;
 
+@SuppressLint("PrivateApi")
 public class Module implements IXposedHookLoadPackage {
-    private static final String TAG = "XposedUniversalAuth";
     private static final String STATUS_BAR_CLASS = "com.android.systemui.statusbar.phone.StatusBar";
     private static final String SYSTEM_UI_CLASS = "com.android.systemui.SystemUI";
     private static final String CORE_STARTABLE_CLASS = "com.android.systemui.CoreStartable";
+    private static final String CENTRAL_SURFACES_CLASS = "com.android.systemui.statusbar.phone.CentralSurfaces";
+    private static final String CENTRAL_SURFACES_IMPL_CLASS = "com.android.systemui.statusbar.phone.CentralSurfacesImpl";
+    private static final String BIOMETRIC_UNLOCK_SOURCE_CLASS = "com.android.systemui.keyguard.shared.model.BiometricUnlockSource";
     private static final String KEYGUARD_UPDATE_MONITOR_CLASS = "com.android.keyguard.KeyguardUpdateMonitor";
     private static final String STATUS_BAR_STATE_CONTROLLER_CLASS = "com.android.systemui.plugins.statusbar.StatusBarStateController";
+    private static final String STATUS_BAR_STATE_CONTROLLER_IMPL_CLASS = "com.android.systemui.statusbar.StatusBarStateControllerImpl";
     private static final String KEYGUARD_UPDATE_MONITOR_LAST_MODE = "ax.nd.universalauth.last-mode";
 
-    // com.android.systemui.statusbar.StatusBarState.SHADE_LOCKED
     private static final int SHADE_LOCKED = 2;
 
     private Method isUserInLockdownMethod;
@@ -56,41 +60,33 @@ public class Module implements IXposedHookLoadPackage {
             isUserInLockdownMethod = getIsUserInLockdownMethod(kumClazz);
 
             try {
-                // Hook com.android.systemui.statusbar.phone.StatusBar.start
-                Class<?> statusBarClass = lpparam.classLoader.loadClass(STATUS_BAR_CLASS);
-                hookStatusBar(lpparam, statusBarClass);
-            } catch (Throwable e) {
-                // Failed to hook status bar class, we are on Android 13 DP Beta 1+
-                // Try using another class
-                try {
-                    Class<?> statusBarClass = lpparam.classLoader.loadClass("com.android.systemui.statusbar.phone.CentralSurfaces");
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    Class<?> statusBarClass = lpparam.classLoader.loadClass(CENTRAL_SURFACES_IMPL_CLASS);
                     hookStatusBar(lpparam, statusBarClass);
-                } catch (Throwable e2) {
-                    // Android 14: Moved to CentralSurfaceImpl
-                    try {
-                        Class<?> statusBarClass = lpparam.classLoader.loadClass("com.android.systemui.statusbar.phone.CentralSurfacesImpl");
-                        hookStatusBar(lpparam, statusBarClass);
-                    } catch (Throwable e3) {
-                        XposedBridge.log("Failed to hook status bar! Initial attempt failed with:");
-                        XposedBridge.log(e);
-                        XposedBridge.log("We tried an alternative class but that failed too:");
-                        XposedBridge.log(e2);
-                    }
+                } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S_V2) {
+                    Class<?> statusBarClass = lpparam.classLoader.loadClass(CENTRAL_SURFACES_CLASS);
+                    hookStatusBar(lpparam, statusBarClass);
+                } else {
+                    Class<?> statusBarClass = lpparam.classLoader.loadClass(STATUS_BAR_CLASS);
+                    hookStatusBar(lpparam, statusBarClass);
                 }
+            } catch (Throwable th) {
+                XposedBridge.log("failed to load status bar class");
+                XposedBridge.log(th);
             }
 
             // Hook com.android.keyguard.KeyguardUpdateMonitor.updateFaceListeningState
             try {
                 addHookEarlyUnlock(kumClazz, lpparam);
-            } catch (Throwable t) {
+            } catch (Throwable th) {
                 XposedBridge.log("Failed to hook early unlock, early unlock hook will not work:");
-                XposedBridge.log(t);
+                XposedBridge.log(th);
             }
             try {
                 TrustHook.INSTANCE.hookKum(kumClazz);
-            } catch (Throwable t) {
+            } catch (Throwable th) {
                 XposedBridge.log("Failed to hook trust hook, trust hook will not work:");
-                XposedBridge.log(t);
+                XposedBridge.log(th);
             }
         }
     }
@@ -99,9 +95,7 @@ public class Module implements IXposedHookLoadPackage {
         XposedHelpers.findAndHookMethod(statusBarClass, "start", new XC_MethodHook() {
             @Override
             protected void afterHookedMethod(MethodHookParam param) throws Throwable {
-//                            XposedBridge.log("FaceUnlock hook pre-install!");
                 hookStatusBar(statusBarClass, lpparam.classLoader, param);
-//                            XposedBridge.log("FaceUnlock hook installed!");
             }
         });
     }
@@ -133,7 +127,7 @@ public class Module implements IXposedHookLoadPackage {
 
         Class<?> sbscClazz;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-            sbscClazz = lpparam.classLoader.loadClass("com.android.systemui.statusbar.StatusBarStateControllerImpl");
+            sbscClazz = lpparam.classLoader.loadClass(STATUS_BAR_STATE_CONTROLLER_IMPL_CLASS);
         } else {
             sbscClazz = lpparam.classLoader.loadClass(STATUS_BAR_STATE_CONTROLLER_CLASS);
         }
@@ -197,12 +191,13 @@ public class Module implements IXposedHookLoadPackage {
         return stream.map(Object::toString).collect(Collectors.joining(",\n"));
     }
 
+    @SuppressLint("PrivateApi")
     private void hookStatusBar(Class<?> statusBarClass, ClassLoader classLoader, XC_MethodHook.MethodHookParam param) throws Throwable {
         Object statusBar = param.thisObject;
         Class<?> systemUiClass;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             // >= Android 14: Same as SystemUi
-            systemUiClass = classLoader.loadClass("com.android.systemui.statusbar.phone.CentralSurfacesImpl");
+            systemUiClass = classLoader.loadClass(CENTRAL_SURFACES_IMPL_CLASS);
         } else if (Build.VERSION.SDK_INT > Build.VERSION_CODES.S_V2) {
             // >= Android 13
             systemUiClass = classLoader.loadClass(CORE_STARTABLE_CLASS);
@@ -223,7 +218,7 @@ public class Module implements IXposedHookLoadPackage {
         Context context = (Context) asAccessible(systemUiClass.getDeclaredField("mContext")).get(statusBar);
         Object kum = asAccessible(statusBarClass.getDeclaredField("mKeyguardUpdateMonitor")).get(statusBar);
 
-        UnlockMethod method = hookStatusBarBiometricUnlock(statusBar, statusBarClass);
+        UnlockMethod method = hookStatusBarBiometricUnlock(classLoader, statusBar, statusBarClass);
 
         UnlockReceiver.INSTANCE.setup(context, statusBar, intent -> {
             try {
@@ -245,8 +240,19 @@ public class Module implements IXposedHookLoadPackage {
         return asAccessible(statusBarClass.getDeclaredField("mBiometricUnlockController")).get(statusBar);
     }
 
-    private UnlockMethod hookStatusBarBiometricUnlock(Object statusBar, Class<?> statusBarClass) throws Throwable {
+    private UnlockMethod hookStatusBarBiometricUnlock(ClassLoader classLoader, Object statusBar, Class<?> statusBarClass) throws Throwable {
         Object biometricUnlockController = getBiometricUnlockControllerFromStatusBar(statusBar, statusBarClass);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.VANILLA_ICE_CREAM) {
+            Class<?> biometricUnlockScoreClass = classLoader.loadClass(BIOMETRIC_UNLOCK_SOURCE_CLASS);
+            Method startWakeAndUnlock = asAccessible(biometricUnlockController.getClass().getDeclaredMethod("startWakeAndUnlock", int.class, biometricUnlockScoreClass));
+
+            return intent -> {
+                if (intent.getBooleanExtra(EXTRA_BYPASS_KEYGUARD, true)) {
+                    int unlockMode = intent.getIntExtra(EXTRA_UNLOCK_MODE, MODE_UNLOCK_FADING);
+                    startWakeAndUnlock.invoke(biometricUnlockController, unlockMode, null);
+                }
+            };
+        }
         Method startWakeAndUnlock = asAccessible(biometricUnlockController.getClass().getDeclaredMethod("startWakeAndUnlock", int.class));
 
         return intent -> {
