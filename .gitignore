@@ -8,7 +8,6 @@
 .externalNativeBuild
 .cxx
 local.properties
-/gradle
 
 # Do not upload libs to Github
 /private-libs
