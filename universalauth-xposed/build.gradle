@@ -4,12 +4,13 @@ plugins {
 }
 
 android {
-    compileSdk 34
+    namespace "ax.nd.universalauth.xposed"
+    compileSdk 35
 
     defaultConfig {
         applicationId "ax.nd.universalauth.xposed"
         minSdk 29
-        targetSdk 34
+        targetSdk 35
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
